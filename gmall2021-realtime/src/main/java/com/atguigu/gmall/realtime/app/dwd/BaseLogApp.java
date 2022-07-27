@@ -83,7 +83,7 @@ public class BaseLogApp {
         SingleOutputStreamOperator<JSONObject> jsonDSWithFlag = midKeyedDS.map(
                 //RichMapFunction进行状态编程
             new RichMapFunction<JSONObject, JSONObject>() {
-                //定义该mid访问状态
+                //定义该mid访问状态，在底层是一个Map结构，map的value就是ValueState对象
                 private ValueState<String> firstVisitDateState;
                 //定义日期格式化对象
                 private SimpleDateFormat sdf;

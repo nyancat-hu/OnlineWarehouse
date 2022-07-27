@@ -23,9 +23,9 @@ public class TableProcess {
     String sinkTable;
     //输出字段
     String sinkColumns;
-    //主键字段
+    //主键字段,不写的话,默认就是id为主键
     String sinkPk;
-    //建表扩展
+    //建表扩展,此处可为空
     String sinkExtend;
 }
 
