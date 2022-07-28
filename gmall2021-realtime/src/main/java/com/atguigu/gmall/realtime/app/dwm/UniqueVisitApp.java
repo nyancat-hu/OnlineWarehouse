@@ -56,7 +56,7 @@ public class UniqueVisitApp {
         DataStreamSource<String> jsonStrDS = env.addSource(kafkaSource);
 
         //TODO 3.对读取到的数据进行结构的换换
-        SingleOutputStreamOperator<JSONObject> jsonObjDS = jsonStrDS.map(jsonStr -> JSON.parseObject(jsonStr));
+        SingleOutputStreamOperator<JSONObject> jsonObjDS = jsonStrDS.map(JSON::parseObject);
 
         //TODO 4.按照设备id进行分组
         KeyedStream<JSONObject, String> keybyWithMidDS = jsonObjDS.keyBy(
@@ -80,6 +80,7 @@ public class UniqueVisitApp {
                     //因为我们统计的是日活DAU，所以状态数据只在当天有效 ，过了一天就可以失效掉
                     StateTtlConfig stateTtlConfig = StateTtlConfig.newBuilder(Time.days(1)).build();
                     lastVisitDateStateDes.enableTimeToLive(stateTtlConfig);
+                    // 赋状态给类属性
                     this.lastVisitDateState = getRuntimeContext().getState(lastVisitDateStateDes);
                 }
 

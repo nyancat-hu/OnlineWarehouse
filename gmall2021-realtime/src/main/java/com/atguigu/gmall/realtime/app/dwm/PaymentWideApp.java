@@ -54,7 +54,7 @@ public class PaymentWideApp {
         FlinkKafkaConsumer<String> paymentInfoSource = MyKafkaUtil.getKafkaSource(paymentInfoSourceTopic, groupId);
         DataStreamSource<String> paymentInfoJsonStrDS = env.addSource(paymentInfoSource);
 
-        //2.2 读取订单宽表数据
+        //2.2 读取订单宽表数据(需要先由订单宽表计算完)
         FlinkKafkaConsumer<String> orderWideSource = MyKafkaUtil.getKafkaSource(orderWideSourceTopic, groupId);
         DataStreamSource<String> orderWideJsonStrDS = env.addSource(orderWideSource);
 

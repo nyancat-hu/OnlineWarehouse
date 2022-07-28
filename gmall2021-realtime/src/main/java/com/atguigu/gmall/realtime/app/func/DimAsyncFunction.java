@@ -10,6 +10,7 @@ import org.apache.flink.streaming.api.functions.async.RichAsyncFunction;
 import org.apache.hadoop.hbase.TableName;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 
@@ -70,7 +71,7 @@ public abstract class DimAsyncFunction<T> extends RichAsyncFunction<T,T> impleme
                         long end = System.currentTimeMillis();
                         System.out.println("异步维度查询耗时" +(end -start)+"毫秒");
                         //将关联后的数据数据继续向下传递
-                        resultFuture.complete(Arrays.asList(obj));
+                        resultFuture.complete(Collections.singletonList(obj));
                     } catch (Exception e) {
                         e.printStackTrace();
                         throw new RuntimeException(tableName + "维度异步查询失败");

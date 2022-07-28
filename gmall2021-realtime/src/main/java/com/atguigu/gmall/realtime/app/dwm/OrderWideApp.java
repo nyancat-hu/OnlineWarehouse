@@ -178,12 +178,12 @@ public class OrderWideApp {
                 new ProcessJoinFunction<OrderInfo, OrderDetail, OrderWide>() {
                     @Override
                     public void processElement(OrderInfo orderInfo, OrderDetail orderDetail, Context ctx, Collector<OrderWide> out) throws Exception {
+                        // 将关联的数据输出为一个宽表对象
                         out.collect(new OrderWide(orderInfo, orderDetail));
                     }
                 }
             );
 
-        //orderWideDS.print("orderWide>>>>");
 
         //TODO 7.关联用户维度
         SingleOutputStreamOperator<OrderWide> orderWideWithUserDS = AsyncDataStream.unorderedWait(

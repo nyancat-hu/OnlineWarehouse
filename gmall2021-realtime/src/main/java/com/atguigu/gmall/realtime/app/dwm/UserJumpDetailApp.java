@@ -5,11 +5,12 @@ import com.alibaba.fastjson.JSONObject;
 import com.atguigu.gmall.realtime.utils.MyKafkaUtil;
 import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.cep.*;
+import org.apache.flink.cep.CEP;
+import org.apache.flink.cep.PatternFlatSelectFunction;
+import org.apache.flink.cep.PatternFlatTimeoutFunction;
+import org.apache.flink.cep.PatternStream;
 import org.apache.flink.cep.pattern.Pattern;
 import org.apache.flink.cep.pattern.conditions.SimpleCondition;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.KeyedStream;
@@ -50,16 +51,6 @@ public class UserJumpDetailApp {
         FlinkKafkaConsumer<String> kafkaSource = MyKafkaUtil.getKafkaSource(sourceTopic, groupId);
         DataStreamSource<String> dataStream = env.addSource(kafkaSource);
 
-        /*DataStream<String> dataStream = env
-            .fromElements(
-                "{\"common\":{\"mid\":\"101\"},\"page\":{\"page_id\":\"home\"},\"ts\":10000} ",
-                "{\"common\":{\"mid\":\"102\"},\"page\":{\"page_id\":\"home\"},\"ts\":12000}",
-                "{\"common\":{\"mid\":\"102\"},\"page\":{\"page_id\":\"good_list\",\"last_page_id\":" +
-                    "\"home\"},\"ts\":150000} ",
-                "{\"common\":{\"mid\":\"102\"},\"page\":{\"page_id\":\"good_list\",\"last_page_id\":" +
-                    "\"detail\"},\"ts\":300000} "
-            );*/
-
 
 
         //TODO 3.对读取到的数据进行结构的换换
@@ -70,6 +61,7 @@ public class UserJumpDetailApp {
         //env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
 
         //TODO 4. 指定事件时间字段
+        // 增加时间事件 水位线
         SingleOutputStreamOperator<JSONObject> jsonObjWithTSDS = jsonObjDS.assignTimestampsAndWatermarks(
             WatermarkStrategy.<JSONObject>forMonotonousTimestamps().withTimestampAssigner(
                 new SerializableTimestampAssigner<JSONObject>() {
@@ -90,42 +82,20 @@ public class UserJumpDetailApp {
                 1.不是从其它页面跳转过来的页面，是一个首次访问页面
                         last_page_id == null
                 2.距离首次访问结束后10秒内，没有对其它的页面再进行访问
+                    情况一：10s内，先进行了一次首次访问，再进行一次首次访问，则认为第一次跳出了
+                    情况二：10s内，进行了一次首次访问，没有第二次访问了，则认为跳出了
         */
         //TODO 6.配置CEP表达式
-        Pattern<JSONObject, JSONObject> pattern = Pattern.<JSONObject>begin("first")
-            .where(
-                //模式1:不是从其它页面跳转过来的页面，是一个首次访问页面
-                new SimpleCondition<JSONObject>() {
-                    @Override
-                    public boolean filter(JSONObject jsonObj) throws Exception {
-                        //获取last_page_id
-                        String lastPageId = jsonObj.getJSONObject("page").getString("last_page_id");
-                        //判断是否为null 将为空的保留，非空的过滤掉
-                        if (lastPageId == null || lastPageId.length() == 0) {
-                            return true;
-                        }
-                        return false;
-                    }
-                }
-            )
-            .next("next")
-            .where(
-                //模式2. 判读是否对页面做了访问
-                new SimpleCondition<JSONObject>() {
-                    @Override
-                    public boolean filter(JSONObject jsonObj) throws Exception {
-                        //获取当前页面的id
-                        String pageId = jsonObj.getJSONObject("page").getString("page_id");
-                        //判断当前访问的页面id是否为null
-                        if (pageId != null && pageId.length() > 0) {
-                            return true;
-                        }
-                        return false;
-                    }
-                }
-            )
-            //3.时间限制模式
-            .within(Time.milliseconds(10000));
+        Pattern<JSONObject, JSONObject> pattern = Pattern.<JSONObject>begin("begin").where(new SimpleCondition<JSONObject>() {
+               @Override
+               public boolean filter(JSONObject jsonObject) throws Exception {
+                   String lastPageId =
+                           jsonObject.getJSONObject("page").getString("last_page_id");
+                   return lastPageId == null || lastPageId.length() <= 0;
+               }
+        }).times(2) //重复两次，默认的使用宽松近邻
+                .consecutive() //指定使用严格近邻
+                .within(Time.seconds(10));
 
 
         //TODO 7.根据：CEP表达式筛选流
@@ -140,11 +110,15 @@ public class UserJumpDetailApp {
             new PatternFlatTimeoutFunction<JSONObject, String>() {
                 @Override
                 public void timeout(Map<String, List<JSONObject>> pattern, long timeoutTimestamp, Collector<String> out) throws Exception {
-                    //获取所有符合first的json对象
-                    List<JSONObject> jsonObjectList = pattern.get("first");
+                    //第一条数据匹配上了，第二条数据没来，才会产生超时
+                    //直接拿出第一个时间返回就行了
+
+                    //获取所有符合begin的json对象
+                    List<JSONObject> jsonObjectList = pattern.get("begin");
                     //注意：在timeout方法中的数据都会被参数1中的标签标记
                     for (JSONObject jsonObject : jsonObjectList) {
                         out.collect(jsonObject.toJSONString());
+                        // 输出到侧输出流，也许是
                     }
                 }
             },
@@ -152,16 +126,25 @@ public class UserJumpDetailApp {
             new PatternFlatSelectFunction<JSONObject, String>() {
                 @Override
                 public void flatSelect(Map<String, List<JSONObject>> pattern, Collector<String> out) throws Exception {
-                    //没有超时的数据，不在我们的统计范围之内 ，所以这里不需要写什么代码
+                    //没有超时的数据，如果匹配上了我们的模式，说明跳出了
+                    // 也就是说第一个数据为NULL,第二个的上一跳也为NULL，那我们提取第一个事件
+                    // 事件匹配上以后，走这条线，其余事件就会被过滤掉
+
+                    //获取所有符合begin的json对象
+                    List<JSONObject> jsonObjectList = pattern.get("begin");
+                    //注意：在timeout方法中的数据都会被参数1中的标签标记
+                    for (JSONObject jsonObject : jsonObjectList) {
+                        out.collect(jsonObject.toJSONString());
+                        // 输出到主流
+                    }
                 }
             }
         );
 
 
-        //TODO 9.从侧输出流中获取超时数据
+        //TODO 9.从侧输出流中获取超时数据，合并主流和侧输出流
         DataStream<String> jumpDS = filterDS.getSideOutput(timeoutTag);
 
-        //jumpDS.print(">>>>>");
 
         //TODO 10.将跳出数据写回到kafka的DWM层
         jumpDS.addSink(MyKafkaUtil.getKafkaSink(sinkTopic));
