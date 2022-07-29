@@ -202,6 +202,7 @@ public class VisitorStatsApp {
         );
 
         //TODO 4. 将4条流合并到一起   注意：只能合并结构相同的流
+        //各流根据自身属性不同，在五个度量中输入指定值，然后通过各维度进行聚合
         DataStream<VisitorStats> unionDS = pvStatsDS.union(uvStatsDS, svStatsDS, userJumpStatsDS);
 
         //TODO 5.设置Watermmark以及提取事件时间
@@ -218,6 +219,8 @@ public class VisitorStatsApp {
         );
 
         //TODO 6.分组  按照地区、渠道、版本、新老访客维度进行分组，因为我们这里有4个维度，所以将它们封装为一个Tuple4
+        // Flink会按照Tuple进行分组，这里就按了四类维度分组，分了四组
+        // 因为我们要拿四个字段作为Key进行分组，所以这里的元组有四个元素
         KeyedStream<VisitorStats, Tuple4<String, String, String, String>> keyedDS = visitorStatsWithWatermarkDS.keyBy(
             new KeySelector<VisitorStats, Tuple4<String, String, String, String>>() {
                 @Override
@@ -238,10 +241,13 @@ public class VisitorStatsApp {
         );
 
         //TODO 8.对窗口的数据进行聚合   聚合结束之后，需要补充统计的起止时间
+        // 这里用reduce，用agg进行增量聚合，来一个累加一个
+        // 但是因为我们要统计开始和结束时间，所以没法使用agg
         SingleOutputStreamOperator<VisitorStats> reduceDS = windowDS.reduce(
             new ReduceFunction<VisitorStats>() {
                 @Override
                 public VisitorStats reduce(VisitorStats stats1, VisitorStats stats2) throws Exception {
+                    //聚合方法，直接累加
                     stats1.setPv_ct(stats1.getPv_ct() + stats2.getPv_ct());
                     stats1.setUv_ct(stats1.getUv_ct() + stats2.getUv_ct());
                     stats1.setSv_ct(stats1.getSv_ct() + stats2.getSv_ct());
@@ -271,6 +277,7 @@ public class VisitorStatsApp {
 
         //TODO 9.向Clickhouse中插入数据
         reduceDS.addSink(
+            // 每年写一个表，按天分区
             ClickHouseUtil.getJdbcSink("insert into visitor_stats_0820 values(?,?,?,?,?,?,?,?,?,?,?,?)")
         );
 

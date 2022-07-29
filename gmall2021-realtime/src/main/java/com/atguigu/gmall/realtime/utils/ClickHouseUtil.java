@@ -26,7 +26,7 @@ public class ClickHouseUtil {
      * @return
      */
     public static <T> SinkFunction getJdbcSink(String sql) {
-        SinkFunction<T> sinkFunction = JdbcSink.<T>sink(
+        SinkFunction<T> sinkFunction = JdbcSink.sink(
             //要执行的SQL语句
             sql,
             //执行写入操作   就是将当前流中的对象属性赋值给SQL的占位符 insert into visitor_stats_0820 values(?,?,?,?,?,?,?,?,?,?,?,?)
